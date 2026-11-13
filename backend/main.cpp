@@ -1,0 +1,22 @@
+#include <httplib.h>
+#include <nlohmann/json.hpp>
+#include <curl/curl.h>
+#include <algorithm>
+#include <cctype>
+#include <iostream>
+#include <regex>
+#include <string>
+using json=nlohmann::json;
+struct Buffer{std::string data;};
+static size_t write_cb(char* p,size_t s,size_t n,void* u){auto*b=static_cast<Buffer*>(u);b->data.append(p,s*n);return s*n;}
+static std::string lower(std::string s){std::transform(s.begin(),s.end(),s.begin(),[](unsigned char c){return (char)std::tolower(c);});return s;}
+static std::string html_decode(std::string s){const std::pair<const char*,const char*> r[]={{"&amp;","&"},{"&quot;","\""},{"&#39;","'"},{"&lt;","<"},{"&gt;",">"}};for(auto&x:r){size_t p=0;while((p=s.find(x.first,p))!=std::string::npos){s.replace(p,std::char_traits<char>::length(x.first),x.second);p+=std::char_traits<char>::length(x.second);}}return s;}
+static std::string meta(const std::string& h,const std::string& key){std::regex a("<meta[^>]+(?:property|name)=[\"']"+key+"[\"'][^>]+content=[\"']([^\"']*)[\"'][^>]*>",std::regex::icase);std::smatch m;if(std::regex_search(h,m,a))return html_decode(m[1]);std::regex b("<meta[^>]+content=[\"']([^\"']*)[\"'][^>]+(?:property|name)=[\"']"+key+"[\"'][^>]*>",std::regex::icase);if(std::regex_search(h,m,b))return html_decode(m[1]);return {};}
+static bool safe_url(const std::string& u){auto x=lower(u);return x.rfind("http://",0)==0||x.rfind("https://",0)==0;}
+static bool fetch(const std::string& url,Buffer& b,std::string& type,long max_bytes=4*1024*1024){CURL*c=curl_easy_init();if(!c)return false;curl_easy_setopt(c,CURLOPT_URL,url.c_str());curl_easy_setopt(c,CURLOPT_FOLLOWLOCATION,1L);curl_easy_setopt(c,CURLOPT_MAXREDIRS,5L);curl_easy_setopt(c,CURLOPT_CONNECTTIMEOUT,12L);curl_easy_setopt(c,CURLOPT_TIMEOUT,25L);curl_easy_setopt(c,CURLOPT_USERAGENT,"VideoDL/1.0 (+self-hosted)");curl_easy_setopt(c,CURLOPT_WRITEFUNCTION,write_cb);curl_easy_setopt(c,CURLOPT_WRITEDATA,&b);curl_easy_setopt(c,CURLOPT_MAXFILESIZE_LARGE,(curl_off_t)max_bytes);CURLcode rc=curl_easy_perform(c);char* ct=nullptr;curl_easy_getinfo(c,CURLINFO_CONTENT_TYPE,&ct);if(ct)type=ct;long code=0;curl_easy_getinfo(c,CURLINFO_RESPONSE_CODE,&code);curl_easy_cleanup(c);return rc==CURLE_OK&&code>=200&&code<300;}
+int main(){curl_global_init(CURL_GLOBAL_DEFAULT);httplib::Server svr;svr.set_payload_max_length(1024*1024);
+svr.Options(R"(/.*)",[](const httplib::Request&,httplib::Response&r){r.set_header("Access-Control-Allow-Origin","*");r.set_header("Access-Control-Allow-Headers","Content-Type");r.set_header("Access-Control-Allow-Methods","GET, POST, OPTIONS");r.status=204;});
+svr.Post("/api/resolve",[](const httplib::Request&req,httplib::Response&res){res.set_header("Access-Control-Allow-Origin","*");try{auto j=json::parse(req.body);std::string url=j.value("url","");if(!safe_url(url)){res.status=400;res.set_content(R"({"error":"只允许 http/https 链接"})","application/json");return;}Buffer b;std::string type;if(!fetch(url,b,type)){res.status=502;res.set_content(R"({"error":"无法读取该地址，可能需要登录、反爬验证或不允许服务器访问"})","application/json");return;}
+json out;out["title"]=meta(b.data,"og:title");if(out["title"].get<std::string>().empty())out["title"]=meta(b.data,"twitter:title");out["thumbnail"]=meta(b.data,"og:image");out["download_url"]=url;out["content_type"]=type;out["message"]=(type.find("video/")==0||type.find("audio/")==0)?"检测到媒体资源，可以尝试下载。":"已读取网页公开元数据；当前链接未提供可直接下载的媒体地址。";res.set_content(out.dump(),"application/json");}catch(...){res.status=400;res.set_content(R"({"error":"请求格式无效"})","application/json");}});
+svr.Get("/api/download",[](const httplib::Request&req,httplib::Response&res){res.set_header("Access-Control-Allow-Origin","*");auto url=req.get_param_value("url");if(!safe_url(url)){res.status=400;res.set_content("Invalid URL","text/plain");return;}Buffer b;std::string type;if(!fetch(url,b,type,200*1024*1024)){res.status=502;res.set_content("Download source unavailable or too large","text/plain");return;}res.set_header("Content-Disposition","attachment; filename=\"videodl-download\"");res.set_content(std::move(b.data),type.empty()?"application/octet-stream":type);});
+const char*portenv=getenv("PORT");int port=portenv?std::stoi(portenv):8080;std::cout<<"VideoDL C++ API listening on "<<port<<std::endl;svr.listen("0.0.0.0",port);curl_global_cleanup();}
