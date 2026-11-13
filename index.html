@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0b0d12"><title>VideoDL — 视频解析与下载</title>
+<style>
+:root{color-scheme:dark;--bg:#0b0d12;--panel:#131720;--line:#252c38;--muted:#8993a4;--text:#f4f6fb;--accent:#8ab4ff}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 50% -20%,#1b2942 0,transparent 55%),var(--bg);color:var(--text);font:15px/1.5 Inter,system-ui,-apple-system,"Segoe UI",sans-serif;min-height:100vh}
+.wrap{width:min(900px,calc(100% - 32px));margin:auto}.top{height:76px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #ffffff10}.brand{display:flex;align-items:center;gap:11px;font-weight:750;font-size:20px;letter-spacing:-.5px}.logo{width:34px;height:34px;border-radius:11px;background:#e9efff;color:#111827;display:grid;place-items:center;font-weight:900}.tag{color:var(--muted);font-size:12px;border:1px solid var(--line);padding:5px 9px;border-radius:99px}
+.hero{text-align:center;padding:76px 0 35px}.eyebrow{color:var(--accent);font-size:12px;letter-spacing:2px;font-weight:700}.hero h1{font-size:clamp(32px,6vw,52px);line-height:1.1;letter-spacing:-2px;margin:15px 0}.hero p{color:var(--muted);margin:0}
+.panel{background:linear-gradient(145deg,#171d28,#11151d);border:1px solid var(--line);border-radius:20px;padding:20px;box-shadow:0 24px 80px #0005}
+.field{display:flex;gap:10px;background:#0b0e14;border:1px solid #303949;border-radius:13px;padding:7px}.field input{min-width:0;flex:1;background:transparent;border:0;outline:0;color:var(--text);padding:0 10px;font:inherit}.field input::placeholder{color:#667184}
+button{border:0;border-radius:10px;background:#e8efff;color:#101827;padding:12px 19px;font-weight:750;font:inherit;cursor:pointer}button:disabled{opacity:.5;cursor:wait}.hint{display:flex;justify-content:space-between;gap:12px;color:var(--muted);font-size:12px;padding:12px 3px 0}
+.result{display:none;margin-top:16px;border:1px solid var(--line);border-radius:16px;overflow:hidden;background:#0e1219}.result.show{display:block}.preview{display:grid;grid-template-columns:180px 1fr;gap:16px;padding:15px}.preview img{width:100%;aspect-ratio:16/9;object-fit:cover;background:#202938;border-radius:10px}.meta h2{font-size:17px;margin:2px 0 8px}.meta p{color:var(--muted);font-size:12px;margin:0;word-break:break-all}.actions{display:flex;gap:9px;padding:0 15px 15px;flex-wrap:wrap}.secondary{background:#202938;color:#e8efff}.status{padding:12px 15px;color:var(--muted);font-size:13px;min-height:42px}.status.error{color:#ff9c9c}.foot{text-align:center;color:#596476;font-size:12px;padding:34px 0 45px}
+@media(max-width:560px){.hero{padding-top:56px}.panel{padding:13px}.field{flex-direction:column}.field input{padding:11px 8px}.field button{width:100%}.preview{grid-template-columns:112px 1fr;gap:11px}.meta h2{font-size:14px}.hint{flex-direction:column}}
+</style></head>
+<body><div class="wrap">
+<header class="top"><div class="brand"><span class="logo">V</span>VideoDL</div><span class="tag">HTML + C++</span></header>
+<main><section class="hero"><div class="eyebrow">VIDEO DOWNLOADER</div><h1>把视频链接，变成下载</h1><p>粘贴视频地址，获取可用的视频信息与下载地址。</p></section>
+<section class="panel"><div class="field"><input id="url" type="url" placeholder="粘贴视频链接，例如 https://example.com/video.mp4" autocomplete="url"><button id="parse">开始解析 ↗</button></div><div class="hint"><span>支持直接视频文件及可公开读取的网页媒体信息</span><span>无需登录</span></div>
+<div id="result" class="result"><div class="preview"><img id="cover" alt="视频封面"><div class="meta"><h2 id="title">等待解析</h2><p id="source"></p></div></div><div class="actions"><button id="download">下载视频</button><button id="copy" class="secondary">复制下载地址</button></div></div><div id="status" class="status" role="status">输入链接后开始解析。</div></section></main>
+<footer class="foot">VideoDL · Open source · 请仅下载你有权保存的内容</footer></div>
+<script>
+const $=id=>document.getElementById(id);let mediaUrl="";
+function message(t,error=false){$('status').textContent=t;$('status').classList.toggle('error',error)}
+function validUrl(s){try{const u=new URL(s);return ['http:','https:'].includes(u.protocol)}catch{return false}}
+$('parse').onclick=async()=>{const url=$('url').value.trim();if(!validUrl(url)){message('请输入有效的 http 或 https 链接。',true);return}
+$('parse').disabled=true;message('正在连接 C++ 解析服务…');$('result').classList.remove('show');
+try{const r=await fetch((window.VIDEODL_API||'http://localhost:8080')+'/api/resolve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url})});const data=await r.json();if(!r.ok)throw new Error(data.error||'解析失败');
+mediaUrl=data.download_url||url;$('title').textContent=data.title||'未获取到标题';$('source').textContent=data.content_type||new URL(url).hostname;
+$('cover').src=data.thumbnail||'';$('cover').style.visibility=data.thumbnail?'visible':'hidden';$('result').classList.add('show');message(data.message||'解析完成。');}
+catch(e){message(e.message+'。请检查后端 API 是否已部署，以及该链接是否允许服务器访问。',true)}finally{$('parse').disabled=false}};
+$('download').onclick=()=>{if(!mediaUrl)return;const a=document.createElement('a');a.href=(window.VIDEODL_API||'http://localhost:8080')+'/api/download?url='+encodeURIComponent(mediaUrl);a.rel='noopener';a.click()};
+$('copy').onclick=async()=>{if(!mediaUrl)return;try{await navigator.clipboard.writeText(mediaUrl);message('下载地址已复制。')}catch{message('复制失败，请手动复制地址。',true)}};
+$('url').addEventListener('keydown',e=>{if(e.key==='Enter')$('parse').click()});
+</script></body></html>
